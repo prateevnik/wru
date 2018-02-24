@@ -14,6 +14,19 @@ import (
 var debug = false
 
 // ExternalTestResult invokes rabin2 from Radare2 project
+// counts lines that matchString, returns an integer.  Radare version 2.4 no longer returns summary statistic for things like number of imports.
+func ExternalTestResultCountOccurrences(targetFile string, command string, arg1 string) int {
+	lineCount := ExternalTestResultLineCount(targetFile, command, arg1)
+	// subtract 1, for the label "[Symbols]"
+	lineCount = lineCount - 1
+	if debug {
+		fmt.Println("::ExternalTestResultCountOccurrences, for ", command, " ", arg1, " will return: ", lineCount)
+	}
+	return lineCount
+}
+
+// ExternalTestResult invokes rabin2 from Radare2 project
+// if zero-length regex string is supplied (""), it will skip trying to split again based on regex. Good for when the selected column is the number format we want already.
 // TODO make better..for now key off of matchString as label for test in DB
 func ExternalTestResult(targetFile string, command string, arg1 string, matchString string, excludeString string, sliceNum int, regex string) int {
 	var Aus bytes.Buffer = GetAusPut(targetFile, command, arg1)
@@ -56,15 +69,17 @@ func ExternalTestResultAsString(targetFile string, command string, arg1 string, 
 		errors.Debug(debug, "::getExternalTestResultAsString REGEX is \n", regex)
 		ourRegex := regexp.MustCompile(regex)
 		interimArray := ourRegex.Split(testAnswerBit, -1)
-		//errors.Debug(debug, "using REGEX, interimArray is: ", string(interimArray))
+
 		testAnswerBit = strings.Join(interimArray, "")
 		testAnswerBit = strings.TrimSpace(testAnswerBit)
 	}
 
-	errors.Debug(debug, "::getExternalTestResultAsString, testAnswerBit for command arg ", arg1, "is >>", testAnswerBit, "<< \n")
+	errors.Debug(debug, "::getExternalTestResultAsString, will return testAnswerBit for command arg ", arg1, " as follows >>", testAnswerBit, "<< \n")
 	return testAnswerBit
 }
 
+/*  scrapeResults returns a single line that matches the passed include / exclude pattern
+ */
 func scrapeResults(Aus bytes.Buffer, expr string, excludeString string) string {
 
 	errors.Debug(debug, "::scrapeResults, expr is %s \n", expr)
@@ -127,6 +142,9 @@ func ExternalTestResultLineCount(targetFile string, command string, arg1 string)
 			}
 		}
 		lineCount = lineCount + 1
+	}
+	if debug {
+		fmt.Println("::ExternalTestResultLineCount will return: ", lineCount)
 	}
 	return lineCount
 }
