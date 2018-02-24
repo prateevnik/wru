@@ -1,235 +1,334 @@
-// WRU, "What Are You", a static binary analysis tool
-
-package main
+package windows
 
 import (
-	"flag"
 	"fmt"
-	"log"
-	"time"
-	"wru/bayes"
-	"wru/crypto"
+	"regexp"
+	"strconv"
+	"strings"
 	"wru/errors"
 	"wru/euclid"
 	"wru/filechecks"
-	"wru/filechecks/windows"
 	"wru/persistence"
 )
 
 var debug = false
+var importedLibraries string
 
-var levelOneVerbosity string // = "Here we will print more verbose output, maybe a line or two.\n Specify as -v"
-var levelTwoVerbosity string
-var vulnPointerUsage string = "Used to specify that a binary is known to be vulnerable in some way"
-var quickBayesianString string = "#Experimental: give rough probability of some things for target file"
-var peerGroupPercentageBoundaryString = "plus/minus percentage boundaries from target file, for peer group for quick Bayesian predictions "
+func getLibrariesForThisFile(scrapedLibsForThisFile string) []string {
+	// index 7 for libname. Do REGEX for each line. TrimSpace etc. if needed.
+	// Then stuff into array.
+	var librariesForThisFile []string
+	lines := strings.Split(scrapedLibsForThisFile, "\n")
 
-//var HorizontalLine = "___________________________________________________________________________________"
+	for _, line := range lines {
+		if strings.Contains(strings.ToLower(line), ".dll") { // FIXME ugly matching
+			bits := strings.Fields(line)
+			rawlib := bits[6] // name=imp.cygssl-1.0.0.dll_SSL_library_init
+			libChunks := strings.Split(rawlib, ".")
 
-func main() {
+			oneLibrary := pickOutDLLname(libChunks)
+			oneLibrary = oneLibrary + "dll"
 
-	go progressWidget(100 * time.Millisecond)
-
-	storedInfoPtr := flag.Bool("storedinfo", false, levelOneVerbosity)
-	verbosePtr := flag.Bool("v", false, levelOneVerbosity)
-	moreVerbosePtr := flag.Bool("vv", false, levelTwoVerbosity)
-	userSuppliedDescriptionPtr := flag.String("description", "", "A phrase describing the target binary")
-	vulnerablePtr := flag.Int("vulnerable", -1, vulnPointerUsage)
-	numberPeersPtr := flag.Int("peers", 4, "integer number of similar binaries to list, will be rounded down to even number")
-	// Bayes is experimental w/ fragile parsing, e.g: bayesian=probability_of:networking>0,given_that:binsz>55000
-	bayesianPtr := flag.String("bayesian", "", "Experimental: a parsed argument to obtain conditional probability of X, given Y")
-	quickBayesianPtr := flag.Bool("quickbayesian", false, quickBayesianString)
-	peerGroupPercentageBoundary := flag.Int("peer_percentage_boundary", 50, peerGroupPercentageBoundaryString)
-
-	flag.Parse()
-
-	args := extractCommandLineArgs()
-	targetFile := args[0]
-
-	// SPECIAL CASES where we don't analyze the target file
-	if *storedInfoPtr == true {
-		fmt.Println(persistence.PrintStoredInfo(targetFile))
-		return
-	} else if *bayesianPtr != "" {
-		//fmt.Println("Bayes is on")
-		osType := filechecks.ExternalTestResultAsString(targetFile, "rabin2", "-I", "os", "", 1, "")
-		bayes.BayesianAnalysis(*bayesianPtr, osType)
-		return
-	}
-	// end of SPECIAL CASES
-
-	var osType = filechecks.ExternalTestResultAsString(targetFile, "rabin2", "-I", "os", "", 1, "")
-	var allTestResults = testOneFile(targetFile, osType)
-	var methodsUsed = windows.Methods()
-
-	var targetFileHash, _ = crypto.MD5hashAsPrimaryKey(targetFile) //<== wru sub-package
-	persistence.StoreResult(targetFileHash, targetFile, osType, allTestResults, methodsUsed, *userSuppliedDescriptionPtr, *vulnerablePtr)
-
-	if osType == "windows" {
-
-		euclidianPeersArray, functionalityArray, verbosity := doWindowsAnalysis(targetFile, targetFileHash, osType, numberPeersPtr,
-			allTestResults, methodsUsed, verbosePtr, moreVerbosePtr, quickBayesianPtr, peerGroupPercentageBoundary)
-
-		printResults(targetFile, verbosity, euclidianPeersArray, functionalityArray)
-	} else if osType == "linux" {
-		fmt.Println("Support for Linux coming soon!")
-	} else {
-		fmt.Printf("ah, we don't support this OS yet: %s \n", osType)
-	}
-}
-
-func doWindowsAnalysis(targetFile string, targetFileHash string, osType string, numberPeersPtr *int,
-	allTestResults map[int]map[string]int, methodsUsed string, verbosePtr *bool, moreVerbosePtr *bool, quickBayesianPtr *bool, peerGroupPercentageBoundary *int) ([]string, []string, string) {
-
-	euclidianPeersArray := euclid.GetEuclideanPeers(targetFile, targetFileHash, osType, numberPeersPtr)
-
-	functionalityArray := windows.GetFunctionalityArray(allTestResults, methodsUsed)
-	var verbosity string
-
-	if *quickBayesianPtr == true {
-		peerBoundary := 50 // default is 50% above and below targetFile's number in each area is the peer group for Bayesian analysis
-		if *peerGroupPercentageBoundary > 0 {
-			peerBoundary = *peerGroupPercentageBoundary
-		}
-		verbosity = verbosity + bayes.QuickBayesian(targetFile, targetFileHash, osType, peerBoundary)
-	}
-
-	if *verbosePtr == true {
-		verbosity = verbosity + windows.GetAttackSurfaceSWAG(targetFile, allTestResults, methodsUsed)
-	} else if *moreVerbosePtr == true {
-		verbosity = verbosity + windows.GetAttackSurfacePeersAverage(targetFile, allTestResults, methodsUsed)
-	} else {
-		// pass
-	}
-
-	return euclidianPeersArray, functionalityArray, verbosity
-}
-
-func printResults(targetFile string, verbosity string, euclidianPeersArray []string, functionalityArray []string) {
-
-	fmt.Printf("\n %s has functionality in the following %d areas:", targetFile, len(functionalityArray))
-	for _, area := range functionalityArray {
-		fmt.Print("\t", area)
-	}
-	fmt.Println("\n")
-
-	fmt.Printf("This binary may be similar to these other programs (smaller score means a closer match):\n")
-	fmt.Println(errors.HorizontalLine)
-
-	for _, peer := range euclidianPeersArray {
-		fmt.Println("\t", peer)
-	}
-
-	fmt.Println("\n", verbosity)
-}
-
-func extractCommandLineArgs() []string {
-	args := flag.Args()
-	if len(args) != 1 {
-		log.Fatal("Specify one file argument. The file arg must come after any other flags like -v or -vv \n " +
-			"Example: wru -v <filename>" +
-			"\n\n\t Other command line options: \n" +
-			"\t --peers=<integer number of similar binaries to list, will be rounded down to even number>\n" +
-			"\t --storedinfo <filename> will print information from our data store on the specified file\n" +
-			"\t --description=\"your description of target file\" \n" +
-			"\t --vulnerable=1 stores that the specified file is vulnerable (0 sets to NOT vulnerable) \n" +
-			"\t --bayesian=<probability_of:something,given_that:precondition> **EXPERIMENTAL**" +
-			"\n\t\t e.g: --bayesian=\"probability_of:networking_calls>0,given_that:binsz>55000\" +\n" +
-			"\t --quickbayesian " + quickBayesianString + "\n" +
-			"\t --peer_percentage_boundary " + peerGroupPercentageBoundaryString +
-			"")
-
-	}
-	return args
-}
-
-// meh, need to ensure that the Radare2 binary 'rabin2' is in the $PATH when run
-func testOneFile(targetFile string, osType string) map[int]map[string]int {
-	// store various test scores in map object, where the key value is numeric order of tests (Go has no Set type)
-	// will need to branch into different test suites for Windows vs. Linux, etc., based on what each binary provides
-
-	scores := make(map[int]map[string]int)
-	scoresKeyCounter := 0
-
-	codeSizeMap := make(map[string]int)
-	// below: use regex "sz=" to splt up 3rd slice which will look like 'sz=13599'. Overkill but regex flexibility for future..
-	codeSizeScore := filechecks.ExternalTestResult(targetFile, "rabin2", "-S", ".text", "", 3, "sz=")
-	codeSizeMap["codeSize"] = codeSizeScore
-	scores[scoresKeyCounter] = codeSizeMap
-	scoresKeyCounter = scoresKeyCounter + 1
-
-	binszMap := make(map[string]int)
-	binszScore := filechecks.ExternalTestResult(targetFile, "rabin2", "-I", "binsz", "", 1, "")
-	binszMap["binsz"] = binszScore
-	scores[scoresKeyCounter] = binszMap
-	scoresKeyCounter = scoresKeyCounter + 1
-
-	symbolsMap := make(map[string]int)
-	symbolsScore := filechecks.ExternalTestResult(targetFile, "rabin2", "-s", "symbols", "Symbols", 0, "")
-	symbolsMap["symbols"] = symbolsScore
-	scores[scoresKeyCounter] = symbolsMap
-	scoresKeyCounter = scoresKeyCounter + 1
-
-	sectionsMap := make(map[string]int)
-	sectionsScore := filechecks.ExternalTestResult(targetFile, "rabin2", "-S", "sections", "", 0, "")
-	sectionsMap["sections"] = sectionsScore
-	scores[scoresKeyCounter] = sectionsMap
-	scoresKeyCounter = scoresKeyCounter + 1
-
-	libraryMap := make(map[string]int)
-	libraryScore := filechecks.ExternalTestResult(targetFile, "rabin2", "-l", "librar", "Linked libraries", 0, "") // # of linked libraries
-	libraryMap["library_count"] = libraryScore
-	scores[scoresKeyCounter] = libraryMap
-	scoresKeyCounter = scoresKeyCounter + 1
-
-	importsMap := make(map[string]int)
-	importsScore := filechecks.ExternalTestResult(targetFile, "rabin2", "-i", "imports", "", 0, "") // # of imports
-	importsMap["imports"] = importsScore
-	scores[scoresKeyCounter] = importsMap
-	scoresKeyCounter = scoresKeyCounter + 1
-
-	dataSectionStringsCountMap := make(map[string]int)
-	dataSectionStringCount := filechecks.ExternalTestResultLineCount(targetFile, "rabin2", "-z") // # of strings in .data section.  .data is where initialized data goes
-	dataSectionStringsCountMap["numDataStrings"] = dataSectionStringCount
-	scores[scoresKeyCounter] = dataSectionStringsCountMap
-	scoresKeyCounter = scoresKeyCounter + 1
-
-	wholeFileStringsCountMap := make(map[string]int)
-	wholeFileStringCount := filechecks.ExternalTestResultLineCount(targetFile, "rabin2", "-zz") // # of strings in entire file
-	wholeFileStringsCountMap["numWholeFileStrings"] = wholeFileStringCount
-	scores[scoresKeyCounter] = wholeFileStringsCountMap
-	scoresKeyCounter = scoresKeyCounter + 1
-
-	// for now, rationale is that OS specific checks likely to be customized to OS,
-	// so better to have have OS tests in an IF block, for each OS. We'll see if this proves best..
-	if osType == "windows" {
-		libCategoriesCount := windows.Libraries(targetFile) //libCategoriesCount = map[int]map[string]int
-		//fmt.Println("from main.testOneFile, libCategoriesCount = ", libCategoriesCount)
-		//fmt.Println(libCategoriesCount) // map[3:map[UI:0] 4:map[REGISTRY:0] 5:map[SECURITY:0] 6:map[CRYPTO:0] 7:map[unknown:74] 0:map[system:16] 1:map[NETWORKING:0] 2:map[MEDIA:0]]
-		for i := 0; i < len(libCategoriesCount); i++ {
-			var littleMap = libCategoriesCount[i]
-			if debug {
-				fmt.Println("FTW! retrieved Windows library category map is ", littleMap)
-			}
-			scores[scoresKeyCounter] = littleMap
-			scoresKeyCounter = scoresKeyCounter + 1
+			//oneLib := libChunks[1] + ".dll"
+			librariesForThisFile = append(librariesForThisFile, oneLibrary)
 		}
 	}
 
 	if debug {
-		fmt.Println("#################")
-		fmt.Println("ABOUT TO RETURN SCORES:")
-		fmt.Println(scores)
-		fmt.Println("#################")
+		fmt.Println("::getLibrariesForThisFile will return: ", librariesForThisFile)
 	}
-	return scores
+	return librariesForThisFile
 }
 
-func progressWidget(delay time.Duration) {
-	for {
-		for _, r := range `-\|/` {
-			fmt.Printf("\r%c", r)
-			time.Sleep(delay)
+func pickOutDLLname(libChunks []string) string {
+	var oneLibrary string
+	for _, chunk := range libChunks { // libChunks example: [imp KERNEL32 dll_CreateProcessA]
+		chunk = strings.ToLower(chunk)
+
+		if strings.Contains(chunk, "imp") {
+			// pass
+		} else if strings.Contains(chunk, "dll") {
+			// pass
+		} else {
+			oneLibrary = oneLibrary + chunk + "."
 		}
 	}
+	return oneLibrary
+}
+
+func getMapNumberLibCallsForEachLibrary(librariesForThisFile []string, uniqueImportedLibraries []string) []map[string]int {
+	var libraryCalls []map[string]int                          // an *array* of maps, where map is of type string:int
+	for _, oneUniqueLibrary := range uniqueImportedLibraries { // BEGIN for EACH LIB
+		oneLibMap := make(map[string]int)
+		libCount := 0
+
+		// find how many times the lib is called
+		for i := 0; i < len(librariesForThisFile); i++ {
+			if oneUniqueLibrary == librariesForThisFile[i] {
+				libCount = libCount + 1
+			}
+		}
+		oneLibMap[oneUniqueLibrary] = libCount
+		libraryCalls = append(libraryCalls, oneLibMap)
+	} // END EACH LIB
+	return libraryCalls
+}
+
+// Methods returns string like "Library1.method; libary1.method2; lib2.method3". Don't like that
+// we're calling rabin2 -s more than once, but will avoid performance optimization for now...
+// well, let's try setting a package variable 'importedLibraries', can't resist .. fingers crossed this doesn't become a shared state bug...should be OK
+func Methods() string { // want to return something like "Library1.method; libary1.method2; lib2.method3"
+	var concatenatedMethodsString string
+	matchingLines := getArrayOfStringsMatchingPatternExcludeString(importedLibraries, "imp.*", "imp.") // Go's RE2 regex acts weird but this seems to work..
+
+	count := 0
+	seperator := ""
+	for _, libCall := range matchingLines {
+		if count > 0 {
+			seperator = ";"
+		}
+		concatenatedMethodsString = concatenatedMethodsString + seperator + libCall
+		count = count + 1
+	}
+	if debug {
+		fmt.Println("windows.Methods returns: ", concatenatedMethodsString)
+	}
+	return concatenatedMethodsString
+}
+
+func getArrayOfStringsMatchingPatternExcludeString(rawString string, regexExpr string, excludeString string) []string {
+	matchArray := strings.Split(rawString, "\n")
+	ourRegex := regexp.MustCompile(regexExpr)
+	unserStringArray := make([]string, 0)
+
+	for _, element := range matchArray {
+		matchingTerm := ourRegex.FindString(element)
+		if len(matchingTerm) > 0 {
+			unserString := strings.TrimPrefix(matchingTerm, excludeString)
+			unserStringArray = append(unserStringArray, unserString)
+		}
+	}
+	return unserStringArray
+}
+
+// Libraries parses info on imported Libraries in Windows
+// TODO: only scrape libs with 'rabin2 -s' once, right now we're doing it
+// each time we call this for a certain libraryCategory, hella inefficient :(
+// func Libraries(targetFile string, libraryCategory string) map[string]int {
+func Libraries(targetFile string) map[int]map[string]int {
+	importedLibraries = filechecks.ScrapeAllOutPut(targetFile, "rabin2", "-s")
+	errors.Debug(debug, "filechecks/windows::Libraries, importedLibraries >>> ", importedLibraries)
+
+	librariesForThisFile := getLibrariesForThisFile(importedLibraries)
+	uniqueImportedLibraries := MapUniqueStrings(librariesForThisFile)
+	if debug {
+		fmt.Println("filechecks/windows::Libraries, uniqueImportedLibraries ==", uniqueImportedLibraries)
+	}
+	// Below:  libraryCalls = []map[string]int, an *array* of maps, where map is of type string:int
+	libraryCalls := getMapNumberLibCallsForEachLibrary(librariesForThisFile, uniqueImportedLibraries) // [map[KERNEL32.dll:62] map[WSOCK32.dll:25]]
+
+	libCategoryCount := getLibCategoryCountMap(libraryCalls)
+	return libCategoryCount // OLD: map[UI:0 REGISTRY:0 SECURITY:0 CRYPTO:0 unknown:74 system:16 NETWORKING:0 MEDIA:0]
+}
+
+func getLibCategoryCountMap(libraryCalls []map[string]int) map[int]map[string]int {
+	categories := persistence.GetLibCategories()
+
+	libCategoryCount := make(map[int]map[string]int)
+	orderCounter := 0
+	for _, category := range categories { //range = [system NETWORKING MEDIA UI REGISTRY SECURITY CRYPTO]
+		oneCategoryCountMap := make(map[string]int)
+		totalCallsForThisCategory := addUpCallsFromUsedLibraries(category, libraryCalls)
+		oneCategoryCountMap[category] = totalCallsForThisCategory
+		libCategoryCount[orderCounter] = oneCategoryCountMap
+		orderCounter = orderCounter + 1
+	}
+
+	if debug {
+		fmt.Println("::getLibCategoryCountMap", libCategoryCount)
+	}
+	return libCategoryCount
+}
+
+// just total up the number of calls for a given category (e.g. "networking") from all imported libraries
+func addUpCallsFromUsedLibraries(category string, libraryCalls []map[string]int) int {
+	var totalCallsForThisCategory int
+	for _, libraryMap := range libraryCalls {
+
+		// fmt.Println(libraryMap) // map[OLEACC.dll:4], looks good:)
+		// get category for this library, SQLquery
+		// if it's not in current category, just skip
+		// otherwise add to total int
+		for libraryName, numCalls := range libraryMap {
+			thisLibCategory := persistence.GetLibraryCategory(libraryName)
+
+			errors.Debug(debug, "filechecks/windows::addUpCallsFromUsedLibraries, thisLibCategory SQL gets: ", thisLibCategory, " our library at hand is: ", libraryName)
+
+			if thisLibCategory == category {
+				totalCallsForThisCategory = totalCallsForThisCategory + numCalls
+			} else {
+				errors.Debug(debug, "This one did *not* match current library category: ", libraryName)
+			}
+		}
+	}
+	return totalCallsForThisCategory
+}
+
+/* GetFunctionalityArray returns array of only those library categories that were used by targetFile, e.g. NETWORKING: 14 calls, etc.
+   Also does method name guessing too.  Supposing the number of category functions identified by
+   library names is X, and the number of category functions identified by function names is Y, then:
+      use whichever estimate for the category (X or Y) is greater
+*/
+func GetFunctionalityArray(allTestResults map[int]map[string]int, methodsUsed string) []string {
+	functionalityArray := make([]string, 0)
+	// pull library category labels out of DB table.
+	uniqueLibCategories := persistence.GetLibCategories()
+
+	for _, oneMap := range allTestResults {
+
+		for k, v := range oneMap {
+			thisKey := strings.ToUpper(k)
+
+			//-- BEGIN logic for each category, eg. NETWORKING --//
+			for _, category := range uniqueLibCategories {
+				if thisKey == category {
+					highestNumberEstimatedFunctions := getLargestOfLibraryOrFunctionEstimates(v, methodsUsed, category)
+					// if we can't identify any functions for eg. NETWORKING, don't even add it to results array.  Only display what probably exists for follow up.
+					if highestNumberEstimatedFunctions > 0 {
+						functionalityArray = append(functionalityArray, category+": "+strconv.Itoa(highestNumberEstimatedFunctions)+" functions")
+					}
+				}
+			}
+			//-- END logic for each category, eg. NETWORKING --//
+		}
+	}
+	if debug {
+		fmt.Println(functionalityArray)
+	}
+	return functionalityArray
+}
+
+func getLargestOfLibraryOrFunctionEstimates(v int, methodsUsed string, category string) int {
+	highestNumberEstimatedFunctions := 0
+	library_CentricCandidateNumber := 0
+
+	if v > 0 {
+		library_CentricCandidateNumber = v
+	}
+
+	function_Name_GuessingCandidateNumber := GetNumberFunctionsByGuessingNames(methodsUsed, category)
+
+	if function_Name_GuessingCandidateNumber > library_CentricCandidateNumber {
+		highestNumberEstimatedFunctions = function_Name_GuessingCandidateNumber
+	} else {
+		highestNumberEstimatedFunctions = library_CentricCandidateNumber
+	}
+	return highestNumberEstimatedFunctions
+}
+
+/*
+GetNumberFunctionsByGuessingNames should be a method that pulls methods by name.. should have this already somewhere
+then for each method, see if it matches the listing of category matches, eg NETWORKING has 'inet', 'gethostby' etc
+*/
+func GetNumberFunctionsByGuessingNames(methodsUsed string, category string) int {
+	var numberFunctionsForCategory = 0
+	libMethodPairs := strings.Split(methodsUsed, ";")
+	for _, pair := range libMethodPairs {
+
+		rawSplit := strings.Split(strings.ToLower(pair), ".dll_")
+		function := rawSplit[1]
+
+		// NOW see if function matches something for category at hand, from our SQLlite db...
+		guessingWordsArray := persistence.GetGuessingWords(category)
+		//fmt.Println(guessingWordsArray)
+		for _, category_word_snippt := range guessingWordsArray {
+			if strings.Contains(function, category_word_snippt) {
+				//fmt.Println("HIT!  function ", function, " contains ", category_word_snippt, " for ", category)
+				numberFunctionsForCategory = numberFunctionsForCategory + 1
+			}
+		}
+	}
+
+	if debug {
+		fmt.Println("::GetNumberFunctionsByGuessingNames, for category ", category, " we guessed # = ", strconv.Itoa(numberFunctionsForCategory))
+	}
+	return numberFunctionsForCategory
+}
+
+// GetAttackSurfaceSWAG is just a Scientific Wild Ass Guess about
+// how much attack surface a binary offers, to aid in deciding whether
+// to manually debug / analyze it or not
+func GetAttackSurfaceSWAG(targetFile string, allTestResults map[int]map[string]int, d string) string {
+
+	codeSegmentInBytes := getCodeSegmentSizeInBytes(allTestResults)
+
+	averageBinSz := persistence.GetAverageBinarySize("windows")
+	avgBinSzInt, _ := strconv.Atoi(averageBinSz) // probably an unnecessary cast from string to int
+	relativePercentage := (float64(codeSegmentInBytes-avgBinSzInt) / float64(avgBinSzInt)) * 100
+
+	relativeAdjective := "% *smaller* "
+	if relativePercentage > 0 {
+		relativeAdjective = "% LARGER "
+	}
+
+	numberUsedLibCategories := len(GetFunctionalityArray(allTestResults, d))
+	swag := "Code instruction segment for " + targetFile + " is " + strconv.Itoa(codeSegmentInBytes) +
+		" bytes, which is " + strconv.FormatFloat(relativePercentage, 'f', 0, 64) + relativeAdjective + "than the average in our DB." +
+		"\nNumber of identified library categories is " + strconv.Itoa(numberUsedLibCategories)
+
+	logOfCodeSize := int(euclid.LogOrZero(float64(codeSegmentInBytes))) // ugly :(
+	swag = putQualitativeLabelOnSWAGscore(logOfCodeSize, numberUsedLibCategories, swag, targetFile)
+	return swag
+}
+
+func getCodeSegmentSizeInBytes(allTestResults map[int]map[string]int) int {
+	var codeSegmentInBytes int
+	for _, oneMap := range allTestResults {
+		for k, v := range oneMap {
+			thisKey := strings.ToLower(k)
+			if thisKey == "binsz" {
+				//fmt.Printf("::GetAttackSurfaceSWAG, binsz = %d \n", v)
+				codeSegmentInBytes = v
+			}
+		}
+	}
+	return codeSegmentInBytes
+}
+
+func putQualitativeLabelOnSWAGscore(logOfCodeSize int, numberUsedLibCategories int, swag string, targetFile string) string {
+	swagScore := logOfCodeSize + numberUsedLibCategories
+	if swagScore > 8 {
+		swag = swag + "\nSWAG: attack surface for debugging/analyzing " + targetFile + " is LARGE"
+	} else if swagScore > 7 {
+		swag = swag + "\nSWAG: attack surface for debugging/analyzing " + targetFile + " is LARGER THAN AVERAGE"
+	} else if swagScore > 6 {
+		swag = swag + "\nSWAG: attack surface for debugging/analyzing " + targetFile + " is MEDIUM"
+	} else {
+		swag = swag + "\nSWAG: attack surface for debugging/analyzing " + targetFile + " is SMALL"
+	}
+	return swag
+}
+
+// GetAttackSurfacePeersAverage does a DB query to compare attack surface average attack surface in our peer group
+func GetAttackSurfacePeersAverage(targetFile string, allTestResults map[int]map[string]int, d string) string {
+	peerSwag := GetAttackSurfaceSWAG(targetFile, allTestResults, d) // start with -v info..
+	// could this:  select avg(binsz) from filestore
+	peerSwag = peerSwag + "..ADDITIONAL VERBOSITY NOT WORKED OUT YET."
+	return peerSwag
+}
+
+/*
+MapUniqueStrings might be useful elsewhere. So exporting for now.
+*/
+func MapUniqueStrings(passedArray []string) []string {
+	m := map[string]bool{}
+	t := []string{}
+
+	for _, v := range passedArray {
+		if _, seen := m[v]; !seen {
+			t = append(t, v)
+			m[v] = true
+		}
+	}
+	return t
 }
