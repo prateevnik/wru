@@ -17,9 +17,9 @@ Installing wru on Ubuntu 16.04:
      export GOPATH=$HOME/src/go
 - if needed create stuff:  mkdir -p ~/src/go/src  # this is assuming you want ~/src for other things, like ~/src/python, ~src/C++ etc.
 - do 'sudo apt-get install  git'
-####- don't apt-get install radare2, the package won't work right for us. Need to fix dependency on R2 version, TODO along with much else
-- download source for Radare2 version 1.3.0, from https://github.com/radare/radare2/archive/1.3.0.tar.gz
-- after unpacking radare2 source, 'cd radare2', then do 'sys/install.sh', then 'sys/user.sh'
+####- don't apt-get install radare2, the package won't work right for us.
+- install source for Radare2 (version 2.4.0 as of February 2018): git clone https://github.com/radare/radare2.git 
+- compile and install Radare2, 'cd radare2', then do 'sys/install.sh', then 'sys/user.sh'
 - cd $GOPATH
 - do 'go get github.com/mattn/go-sqlite3'
 - from $HOME/src/go/src, do 'git clone https://github.com/prateevnik/wru.git'
