@@ -19,13 +19,11 @@ func getLibrariesForThisFile(scrapedLibsForThisFile string) []string {
 	// Then stuff into array.
 	var librariesForThisFile []string
 	lines := strings.Split(scrapedLibsForThisFile, "\n")
-	for _, line := range lines {
 
+	for _, line := range lines {
 		if strings.Contains(strings.ToLower(line), ".dll") { // FIXME ugly matching
 			bits := strings.Fields(line)
-			rawlib := bits[7] // name=imp.cygssl-1.0.0.dll_SSL_library_init
-			//dllIndex := strings.Index(rawlib,".dll")
-			// fmt.Println("index of .dll is: ", dllIndex)
+			rawlib := bits[6] // name=imp.cygssl-1.0.0.dll_SSL_library_init
 			libChunks := strings.Split(rawlib, ".")
 
 			oneLibrary := pickOutDLLname(libChunks)
@@ -35,15 +33,19 @@ func getLibrariesForThisFile(scrapedLibsForThisFile string) []string {
 			librariesForThisFile = append(librariesForThisFile, oneLibrary)
 		}
 	}
+
+	if debug {
+		fmt.Println("::getLibrariesForThisFile will return: ", librariesForThisFile)
+	}
 	return librariesForThisFile
 }
 
 func pickOutDLLname(libChunks []string) string {
 	var oneLibrary string
-	for _, chunk := range libChunks {
+	for _, chunk := range libChunks { // libChunks example: [imp KERNEL32 dll_CreateProcessA]
 		chunk = strings.ToLower(chunk)
-		// fmt.Println(chunk)
-		if strings.Contains(chunk, "name=imp") {
+
+		if strings.Contains(chunk, "imp") {
 			// pass
 		} else if strings.Contains(chunk, "dll") {
 			// pass
@@ -74,10 +76,10 @@ func getMapNumberLibCallsForEachLibrary(librariesForThisFile []string, uniqueImp
 
 // Methods returns string like "Library1.method; libary1.method2; lib2.method3". Don't like that
 // we're calling rabin2 -s more than once, but will avoid performance optimization for now...
-// well, let's try setting a package variable 'importedLibraries', can't resist .. fingers crossed this doesn't become a shared state bug
-func Methods() string { // want to return somethign like "Library1.method; libary1.method2; lib2.method3"
+// well, let's try setting a package variable 'importedLibraries', can't resist .. fingers crossed this doesn't become a shared state bug...should be OK
+func Methods() string { // want to return something like "Library1.method; libary1.method2; lib2.method3"
 	var concatenatedMethodsString string
-	matchingLines := getArrayOfStringsMatchingPatternExcludeString(importedLibraries, "name=imp.*", "name=imp.") // Go's RE2 regex acts weird but this seems to work..
+	matchingLines := getArrayOfStringsMatchingPatternExcludeString(importedLibraries, "imp.*", "imp.") // Go's RE2 regex acts weird but this seems to work..
 
 	count := 0
 	seperator := ""
@@ -88,7 +90,9 @@ func Methods() string { // want to return somethign like "Library1.method; libar
 		concatenatedMethodsString = concatenatedMethodsString + seperator + libCall
 		count = count + 1
 	}
-	//fmt.Println("windows.Methods ret: ", concatenatedMethodsString)
+	if debug {
+		fmt.Println("windows.Methods returns: ", concatenatedMethodsString)
+	}
 	return concatenatedMethodsString
 }
 
@@ -189,7 +193,10 @@ func GetFunctionalityArray(allTestResults map[int]map[string]int, methodsUsed st
 			for _, category := range uniqueLibCategories {
 				if thisKey == category {
 					highestNumberEstimatedFunctions := getLargestOfLibraryOrFunctionEstimates(v, methodsUsed, category)
-					functionalityArray = append(functionalityArray, category+": "+strconv.Itoa(highestNumberEstimatedFunctions)+" functions ")
+					// if we can't identify any functions for eg. NETWORKING, don't even add it to results array.  Only display what probably exists for follow up.
+					if highestNumberEstimatedFunctions > 0 {
+						functionalityArray = append(functionalityArray, category+": "+strconv.Itoa(highestNumberEstimatedFunctions)+" functions")
+					}
 				}
 			}
 			//-- END logic for each category, eg. NETWORKING --//
@@ -207,7 +214,6 @@ func getLargestOfLibraryOrFunctionEstimates(v int, methodsUsed string, category 
 
 	if v > 0 {
 		library_CentricCandidateNumber = v
-		//fmt.Println("libraryCentricCandidateNumber for ", category, " = ", strconv.Itoa(library_CentricCandidateNumber))
 	}
 
 	function_Name_GuessingCandidateNumber := GetNumberFunctionsByGuessingNames(methodsUsed, category)
@@ -225,8 +231,6 @@ GetNumberFunctionsByGuessingNames should be a method that pulls methods by name.
 then for each method, see if it matches the listing of category matches, eg NETWORKING has 'inet', 'gethostby' etc
 */
 func GetNumberFunctionsByGuessingNames(methodsUsed string, category string) int {
-	//errors.Debug(debug, "methodsUsed = ", methodsUsed, "category= ", category)
-	// fmt.Println("::GetNumberFunctionsByGuessingNames,  methodsUsed = ", methodsUsed, "category= ", category) // cygwin1.dll___cxa_atexit;cygwin1.dll___errno, etc.
 	var numberFunctionsForCategory = 0
 	libMethodPairs := strings.Split(methodsUsed, ";")
 	for _, pair := range libMethodPairs {
