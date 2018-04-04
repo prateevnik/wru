@@ -310,12 +310,14 @@ func putQualitativeLabelOnSWAGscore(logOfCodeSize int, numberUsedLibCategories i
 }
 
 // GetAttackSurfacePeersAverage does a DB query to compare attack surface average attack surface in our peer group
+/*
 func GetAttackSurfacePeersAverage(targetFile string, allTestResults map[int]map[string]int, d string) string {
 	peerSwag := GetAttackSurfaceSWAG(targetFile, allTestResults, d) // start with -v info..
 	// could this:  select avg(binsz) from filestore
 	peerSwag = peerSwag + "..ADDITIONAL VERBOSITY NOT WORKED OUT YET."
 	return peerSwag
 }
+*/
 
 /*
 MapUniqueStrings might be useful elsewhere. So exporting for now.
