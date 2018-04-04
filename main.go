@@ -19,10 +19,13 @@ import (
 var debug = false
 
 var levelOneVerbosity string // = "Here we will print more verbose output, maybe a line or two.\n Specify as -v"
-var levelTwoVerbosity string
+var fileInfoString string = " Display any info captured in our DB about each peer program"
 var vulnPointerUsage string = "Used to specify that a binary is known to be vulnerable in some way"
-var quickBayesianString string = "#Experimental: give rough probability of some things for target file"
-var peerGroupPercentageBoundaryString = "plus/minus percentage boundaries from target file, for peer group for quick Bayesian predictions "
+var bayesianPtrUsage string = " a parsed argument to obtain conditional probability of X, given Y"
+var quickBayesianString string = " give rough probability of some things for target file"
+var peerGroupPercentageBoundaryString = " plus/minus percentage boundaries from target file, for peer group for quick Bayesian predictions "
+var userSpecifiedMetadataString string = " only use specified metadata to compare target file with peers"
+var userSpecifiedExcludeMetadataString string = " EXCLUDE the specified metadata when comparing target file with peers"
 
 //var HorizontalLine = "___________________________________________________________________________________"
 
@@ -32,14 +35,16 @@ func main() {
 
 	storedInfoPtr := flag.Bool("storedinfo", false, levelOneVerbosity)
 	verbosePtr := flag.Bool("v", false, levelOneVerbosity)
-	moreVerbosePtr := flag.Bool("vv", false, levelTwoVerbosity)
+	fileInfoPtr := flag.Bool("peerinfo", false, fileInfoString)
 	userSuppliedDescriptionPtr := flag.String("description", "", "A phrase describing the target binary")
 	vulnerablePtr := flag.Int("vulnerable", -1, vulnPointerUsage)
 	numberPeersPtr := flag.Int("peers", 4, "integer number of similar binaries to list, will be rounded down to even number")
 	// Bayes is experimental w/ fragile parsing, e.g: bayesian=probability_of:networking>0,given_that:binsz>55000
-	bayesianPtr := flag.String("bayesian", "", "Experimental: a parsed argument to obtain conditional probability of X, given Y")
+	bayesianPtr := flag.String("bayesian", "", bayesianPtrUsage)
 	quickBayesianPtr := flag.Bool("quickbayesian", false, quickBayesianString)
 	peerGroupPercentageBoundary := flag.Int("peer_percentage_boundary", 50, peerGroupPercentageBoundaryString)
+	userSpecifiedMetadata := flag.String("include_file_metadata", "", userSpecifiedMetadataString)
+	userSpecifiedExcludeMetadata := flag.String("exclude_file_metadata", "", userSpecifiedExcludeMetadataString)
 
 	flag.Parse()
 
@@ -68,7 +73,7 @@ func main() {
 	if osType == "windows" {
 
 		euclidianPeersArray, functionalityArray, verbosity := doWindowsAnalysis(targetFile, targetFileHash, osType, numberPeersPtr,
-			allTestResults, methodsUsed, verbosePtr, moreVerbosePtr, quickBayesianPtr, peerGroupPercentageBoundary)
+			allTestResults, methodsUsed, verbosePtr, fileInfoPtr, quickBayesianPtr, peerGroupPercentageBoundary, userSpecifiedMetadata, userSpecifiedExcludeMetadata)
 
 		printResults(targetFile, verbosity, euclidianPeersArray, functionalityArray)
 	} else if osType == "linux" {
@@ -79,9 +84,13 @@ func main() {
 }
 
 func doWindowsAnalysis(targetFile string, targetFileHash string, osType string, numberPeersPtr *int,
-	allTestResults map[int]map[string]int, methodsUsed string, verbosePtr *bool, moreVerbosePtr *bool, quickBayesianPtr *bool, peerGroupPercentageBoundary *int) ([]string, []string, string) {
+	allTestResults map[int]map[string]int, methodsUsed string, verbosePtr *bool, fileInfoPtr *bool,
+	quickBayesianPtr *bool, peerGroupPercentageBoundary *int, userSpecifiedMetadata *string,
+	userSpecifiedExcludeMetadata *string) ([]string, []string, string) {
 
-	euclidianPeersArray := euclid.GetEuclideanPeers(targetFile, targetFileHash, osType, numberPeersPtr)
+	//fmt.Println("::doWindowsAnalysis, wir haben ", *userSpecifiedMetadata)
+
+	euclidianPeersArray := euclid.GetEuclideanPeers(targetFile, targetFileHash, osType, numberPeersPtr, fileInfoPtr, userSpecifiedMetadata, userSpecifiedExcludeMetadata)
 
 	functionalityArray := windows.GetFunctionalityArray(allTestResults, methodsUsed)
 	var verbosity string
@@ -96,10 +105,6 @@ func doWindowsAnalysis(targetFile string, targetFileHash string, osType string, 
 
 	if *verbosePtr == true {
 		verbosity = verbosity + windows.GetAttackSurfaceSWAG(targetFile, allTestResults, methodsUsed)
-	} else if *moreVerbosePtr == true {
-		verbosity = verbosity + windows.GetAttackSurfacePeersAverage(targetFile, allTestResults, methodsUsed)
-	} else {
-		// pass
 	}
 
 	return euclidianPeersArray, functionalityArray, verbosity
@@ -133,10 +138,17 @@ func extractCommandLineArgs() []string {
 			"\t --storedinfo <filename> will print information from our data store on the specified file\n" +
 			"\t --description=\"your description of target file\" \n" +
 			"\t --vulnerable=1 stores that the specified file is vulnerable (0 sets to NOT vulnerable) \n" +
-			"\t --bayesian=<probability_of:something,given_that:precondition> **EXPERIMENTAL**" +
-			"\n\t\t e.g: --bayesian=\"probability_of:networking_calls>0,given_that:binsz>55000\" +\n" +
+			"\t ************************************** \n" +
+			"\t ******* EXPERIMENTAL FEATURES: ******* \n" +
+			"\t ************************************** \n" +
+			"\t --bayesian=<probability_of:something,given_that:precondition>" +
+			"\n\t\t Ex: --bayesian=\"probability_of:networking_calls>0,given_that:binsz>55000\" \n" +
 			"\t --quickbayesian " + quickBayesianString + "\n" +
-			"\t --peer_percentage_boundary " + peerGroupPercentageBoundaryString +
+			"\t --peer_percentage_boundary " + peerGroupPercentageBoundaryString + "\n" +
+			"\t --include_file_metadata " + userSpecifiedMetadataString +
+			"\n\t\t Ex: --include_file_metadata=binsz,networking_calls,registry_calls \n" +
+			"\t --exclude_file_metadata " + userSpecifiedExcludeMetadataString +
+			"\n\t\t Ex: --exclude_file_metadata=binsz,networking_calls,registry_calls \n" +
 			"")
 
 	}
