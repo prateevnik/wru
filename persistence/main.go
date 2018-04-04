@@ -72,7 +72,7 @@ func RetrievePeerBinaryRows(osType string) *sql.Rows {
 	// end setup, on with the show:
 
 	// now get the rest of the rows
-	peerBinaryRows, err := db.Query("SELECT md5_hash, filename, static_score, code_size, binsz, "+
+	peerBinaryRows, err := db.Query("SELECT md5_hash, filename, description, static_score, code_size, binsz, "+
 		" symbols, sections, library_count, imports, num_data_strings,"+
 		"system_calls, networking_calls, media_calls, ui_calls, registry_calls, security_calls, crypto_calls, database_calls, unknown_calls, known_vulnerable  FROM filestore WHERE os_type = $1", osType)
 
@@ -203,7 +203,7 @@ func pullFromScores(label string, scores map[int]map[string]int) float64 {
 			//testValue = getLogOrZero(value)
 			if key == label {
 				testValue = float64(value)
-				errors.Debug(debug, "persistenceUtils.pullFromScores, we get:", strconv.FormatFloat(testValue, 'f', 1, 64))
+				errors.Debug(debug, "persistence.pullFromScores, we get:", strconv.FormatFloat(testValue, 'f', 1, 64))
 			}
 		}
 	}
