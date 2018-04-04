@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -155,7 +156,11 @@ func GetAusPut(targetFile string, command string, arg1 string) bytes.Buffer {
 	var Aus bytes.Buffer
 	unserKommando.Stdout = &Aus
 	err := unserKommando.Run()
-	errors.Check(err)
+	if err != nil {
+		fmt.Println("Could not read file.")
+		os.Exit(1)
+	}
+	//errors.Check(err)
 	return Aus
 }
 
