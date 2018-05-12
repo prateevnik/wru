@@ -15,24 +15,24 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var debug = false
-var configurationFile = "wru.conf"
+// need to work in best DB practices from http://go-database-sql.org
+// .. they say sql.DB is meant to be long-lived, global is often OK..
+// since README on github updated for copying data.db into place, will no
+// longer have ugly code to try to create .wru/data.db on the fly.
+var (
+	debug             = false
+	configurationFile = "wru.conf"
+	db                *sql.DB
+	err               error
+)
 
 func PrintStoredInfo(targetFile string) string {
-	// BEGIN not DRY :()
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
-	// END not DRY
 
-	//fmt.Println("Wir sind hier, 1")
 	var firstSQLquery = "SELECT description FROM filestore WHERE filename = $1 COLLATE  NOCASE"
 	infoStringTargetFile := doSimplePreparedQuery(db, firstSQLquery, targetFile)
-	//fmt.Println("Wir sind hier, 2")
+
 	if len(infoStringTargetFile) == 0 {
 		infoStringTargetFile = "no description or vulnerability data stored in our db for " + targetFile
 	}
@@ -41,15 +41,8 @@ func PrintStoredInfo(targetFile string) string {
 
 // RetrieveStoredMethodCallsForFile pulls a string like "msvcrt.dll__exit;msvcrt.dll__c_exit;msvcrt.dll_strncpy"
 func RetrieveStoredMethodCallsForFile(md5_hash string) string {
-	// BEGIN not DRY :()
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
-	// END not DRY
 
 	var methodsSQLquery = "SELECT method_calls FROM filestore WHERE md5_hash = $1"
 	methodsStringTargetFile := doSimplePreparedQuery(db, methodsSQLquery, md5_hash)
@@ -62,35 +55,25 @@ func RetrieveStoredMethodCallsForFile(md5_hash string) string {
 
 // RetrievePeerBinaryRows does just that..
 func RetrievePeerBinaryRows(osType string) *sql.Rows {
-	// set up boilerplate..
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
-	// end setup, on with the show:
 
 	// now get the rest of the rows
-	peerBinaryRows, err := db.Query("SELECT md5_hash, filename, description, static_score, code_size, binsz, "+
+	peerBinaryRows, queryError := db.Query("SELECT md5_hash, filename, description, static_score, code_size, binsz, "+
 		" symbols, sections, library_count, imports, num_data_strings,"+
 		"system_calls, networking_calls, media_calls, ui_calls, registry_calls, security_calls, crypto_calls, database_calls, unknown_calls, known_vulnerable  FROM filestore WHERE os_type = $1", osType)
 
-	if err != nil {
-		log.Fatal(err)
+	if queryError != nil {
+		log.Fatal(queryError)
 	}
 	return peerBinaryRows
 }
 
 // RetrieveTargetFileRows does that
 func RetrieveTargetFileRows(targetFileHash string) *sql.Rows {
-	// set up boilerplate..
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
+
 	// end setup, on with the show:
 	targetRows, targetErr := db.Query("SELECT md5_hash, filename, static_score, code_size, binsz, "+
 		" symbols, sections, library_count, imports, num_data_strings, system_calls, networking_calls, media_calls, ui_calls, registry_calls, security_calls, crypto_calls, database_calls, unknown_calls  FROM filestore WHERE md5_hash = $1", targetFileHash)
@@ -106,14 +89,14 @@ func floatToString(inputNum float64) string {
 }
 
 func createDummyConfigFile(WRUdir string, configFile string) {
-	if _, err := os.Stat(WRUdir); os.IsNotExist(err) {
+	if _, statError := os.Stat(WRUdir); os.IsNotExist(statError) {
 		errors.Debug(debug, "The WRU directory does not exist, will try to create: ", WRUdir)
 		os.MkdirAll(WRUdir, 0700)
 	}
 
 	dummyLine := []byte("# Uncomment line below to specify path to an alternate SQLite DB (maybe shared?) used by WRU \n# databasedir=/foo/bar/\n")
-	err := ioutil.WriteFile(configFile, dummyLine, 0600)
-	if err != nil {
+	writeError := ioutil.WriteFile(configFile, dummyLine, 0600)
+	if writeError != nil {
 		errors.Debug(debug, "::createDummyConfigFile, could not create placeholder config file at: ", configFile)
 	}
 }
@@ -124,15 +107,15 @@ func getDatabaseFileDirectory() string { // returns /Users/username/.wru/
 
 	WRUdir := getWRUdir() // by default will be /Users/username/.wru/, unless changed below..
 	var configFile = WRUdir + configurationFile
-	file, err := os.Open(configFile)
+	file, openError := os.Open(configFile)
 
 	// *NO* PERSONAL CONFIG FILE FOUND..
-	if err != nil {
+	if openError != nil {
 		errors.Debug(debug, "::getDatabaseFileDirectory, looks like no config file in user's home dir, specifically: ", configFile)
 		//createDummyConfigFile(WRUdir, configFile) // eh, get this working ... logic should check if there's an *uncommented* entry in personal config file
 		// or just print usage message, put wru.conf in $HOME/.wru ? FIXME
 
-		if _, err := os.Stat(fallbackLocation); os.IsNotExist(err) {
+		if _, statError := os.Stat(fallbackLocation); os.IsNotExist(statError) {
 			errors.Debug(debug, "Fallback DB location at this location does not exist: ", fallbackLocation)
 		} else {
 			WRUdir = fallbackLocation
@@ -142,8 +125,8 @@ func getDatabaseFileDirectory() string { // returns /Users/username/.wru/
 	} else {
 		defer file.Close()
 		scanner, customWRUdir := extractUserSpecifiedDBdirectory(file, WRUdir)
-		if err := scanner.Err(); err != nil {
-			log.Fatal(err)
+		if scanError := scanner.Err(); scanError != nil {
+			log.Fatal(scanError)
 		}
 		WRUdir = customWRUdir
 	}
@@ -183,12 +166,12 @@ func getWRUdir() string {
 }
 
 func checkDBexists(pathToDataDB string, WRUdir string) {
-	if _, err := os.Stat(pathToDataDB); os.IsNotExist(err) {
+	if _, statError := os.Stat(pathToDataDB); os.IsNotExist(statError) {
 		errors.Debug(debug, "The database file does NOT exist, need to create it first:", pathToDataDB)
 		os.MkdirAll(WRUdir, 0700)
 
-		_, err := os.Create(pathToDataDB)
-		if err != nil {
+		_, createError := os.Create(pathToDataDB)
+		if createError != nil {
 			fmt.Printf("Blew up trying to create DB at %s \n", pathToDataDB)
 			fmt.Printf("\t Check filesystem permissions, and any config file settings at %s%s.\n", WRUdir, configurationFile)
 		}
@@ -230,11 +213,11 @@ func StoreResult(MD5hash string, targetFile string, osType string, scores map[in
 
 	checkDBexists(pathToDataDB, WRUdir)
 
-	db, err := sql.Open("sqlite3", pathToDataDB)
+	db = getDBconnection()
 	defer db.Close()
 
 	if err != nil {
-		fmt.Printf("Blew up trying to create database file at %s \n", pathToDataDB)
+		fmt.Printf("Blew up trying to access database file at %s \n", pathToDataDB)
 		fmt.Println(err)
 		os.Exit(1)
 	}
@@ -258,50 +241,13 @@ func StoreResult(MD5hash string, targetFile string, osType string, scores map[in
 	var mediaCalls = int(pullFromScores("MEDIA", scores))
 	var uiCalls = int(pullFromScores("UI", scores))
 
-	var createString = "CREATE TABLE IF NOT EXISTS `filestore`" +
-		" (`md5_hash` VARCHAR(64) PRIMARY KEY  NOT NULL, " +
-		" `filename` VARCHAR(255) NOT NULL, " +
-		" `timestamp` DATETIME, " +
-		" `os_type` VARCHAR(15), " +
-		" `static_score` REAL NOT NULL, " +
-		" `code_size` REAL, " +
-		" `binsz` REAL, " +
-		" `symbols` REAL, " +
-		" `sections` REAL, " +
-		" `library_count` REAL, " +
-		" `imports` REAL, " +
-		" `num_data_strings` REAL, " +
-		" `num_wholefile_strings` REAL, " +
-		" `description` VARCHAR(255)," +
-		" `known_vulnerable` INTEGER," +
-		" `system_calls` INTEGER," +
-		" `networking_calls` INTEGER," +
-		" `media_calls` INTEGER," +
-		" `UI_calls` INTEGER," +
-		" `registry_calls` INTEGER," +
-		" `security_calls` INTEGER," +
-		" `crypto_calls` INTEGER," +
-		" `database_calls` INTEGER," +
-		" `unknown_calls` INTEGER," +
-		" `method_calls` TEXT" +
-		")"
-
-	_, err = db.Exec(createString) // runs normally, due to "CREATE IF NOT EXISTS"
-
-	if err != nil {
-		// errors.Debug(debug, "Blew up trying to create table with: ", createString)
-		fmt.Println("Blew up trying to create table with: ", createString)
-		fmt.Println(err)
-		os.Exit(1)
-	}
-
 	// now put stuff in the table..
 	if debug {
 		fmt.Println("userSuppliedDescriptionPtr = ", userSuppliedDescriptionPtr)
 		fmt.Println(" vulnerablePtr = ", vulnerablePtr)
 	}
 
-	_, err = db.Exec("INSERT INTO `filestore` (md5_hash, filename, timestamp, os_type, " +
+	_, execError2 := db.Exec("INSERT INTO `filestore` (md5_hash, filename, timestamp, os_type, " +
 		"static_score, code_size, binsz, symbols, sections, library_count, imports," +
 		"num_data_strings, num_wholefile_strings, description, known_vulnerable, " +
 		"system_calls, networking_calls, media_calls, " +
@@ -334,8 +280,8 @@ func StoreResult(MD5hash string, targetFile string, osType string, scores map[in
 		"', '" + methodsUsed +
 		"' ) ")
 
-	if err != nil { // fugly code here, FIXME
-		var theProblem = err.Error() // GoLang standard is error always is a string, so..
+	if execError2 != nil { // fugly code here, FIXME
+		var theProblem = execError2.Error() // GoLang standard is error always is a string, so..
 		if strings.Contains(theProblem, "UNIQUE constraint failed") {
 			errors.Debug(debug, "### FWIW, looks like we already have this file in the database, with MD5hash %s . ###\n", MD5hash)
 
@@ -348,17 +294,17 @@ func StoreResult(MD5hash string, targetFile string, osType string, scores map[in
 				vulnUpdate = "0"
 			}
 			if vulnerablePtr == 0 || vulnerablePtr == 1 {
-				_, err = db.Exec("UPDATE `filestore` SET " +
+				_, execError := db.Exec("UPDATE `filestore` SET " +
 					vulnUpdate +
 
 					" WHERE md5_hash = '" + MD5hash + "'")
 
-				if err != nil {
+				if execError != nil {
 					fmt.Println(err)
 				}
 			} else { // not update Vuln flag, but file already in DB, so just update metadata for the file
 
-				_, err = db.Exec("UPDATE `filestore` SET " +
+				_, execError := db.Exec("UPDATE `filestore` SET " +
 
 					"filename = '" + targetFile + "', " +
 					"timestamp = CURRENT_TIMESTAMP, " +
@@ -387,26 +333,32 @@ func StoreResult(MD5hash string, targetFile string, osType string, scores map[in
 
 					" WHERE md5_hash = '" + MD5hash + "'")
 
-				if err != nil {
-					fmt.Println(err)
+				if execError != nil {
+					fmt.Println(execError)
 				}
 			}
 
 		} else {
-			fmt.Println(err)
+			fmt.Println(execError2)
 			os.Exit(1)
 		}
 	}
 }
 
+// NEU as of 4-25-18, trying to get DRY in effect..
+// note: don't do db.Close() within this shared helper function, since that will kill the *db
+// instance before handing it to the calling functions.. defeating the purpose of it all :)
 func getDBconnection() *sql.DB {
 	var pathToDataDB = getPathToDataDB()
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	//defer db.Close() //<== if used this will ensure every calling method gets 'database closed', no bueno!
+	var WRUdir = getWRUdir()
+	checkDBexists(pathToDataDB, WRUdir)
 
+	db, err = sql.Open("sqlite3", pathToDataDB)
+	errors.Check(err)
+
+	db.Ping() // if we're going to fail on DB access, fail now!
 	if err != nil {
-		fmt.Printf("Blew up trying to create database file at %s \n", pathToDataDB)
-		fmt.Println(err)
+		fmt.Println("persistence.getDBconnection blew up trying to test connection to DB (ping) at ", pathToDataDB)
 		os.Exit(1)
 	}
 	return db
@@ -427,34 +379,36 @@ func GetGuessingWords(category string) []string {
 }
 
 func doQueryNoParameters(passedQuery string) []string {
-	db := getDBconnection()
-	defer db.Close()
+	db = getDBconnection()
+	defer db.Close() // SCHEISSE
 
-	stmt, err := db.Prepare(passedQuery) // prepared statement, for safety :)
-	errors.Check(err)
+	stmt, statementError := db.Prepare(passedQuery) // prepared statement, for safety :)
+	errors.Check(statementError)
 	defer stmt.Close()
 
-	rows, err := stmt.Query()
-	errors.Check(err)
+	rows, queryError := stmt.Query()
+	errors.Check(queryError)
 	defer rows.Close()
 
 	var queryResultArray []string
 	var oneRowAnswer string
 
 	for rows.Next() {
-		err1 := rows.Scan(&oneRowAnswer)
+		scanError := rows.Scan(&oneRowAnswer)
 
 		queryResultArray = append(queryResultArray, oneRowAnswer)
 
-		if err1 != nil {
-			log.Fatal(err1)
+		if scanError != nil {
+			log.Fatal(scanError)
 		}
 	}
 
-	if err = rows.Err(); err != nil {
-		errors.Debug(debug, "::doQueryNoParameters, must have not been any results at all?", "")
-		log.Fatal(err)
-	}
+	/*
+		if err = rows.Err(); err != nil {
+			errors.Debug(debug, "::doQueryNoParameters, must have not been any results at all?", "")
+			log.Fatal(err)
+		}
+	*/
 	//errors.Debug(debug, "::doQueryNoParameters, we return : ", queryResultArray)
 	//fmt.Println(queryResultArray)
 	return queryResultArray
@@ -462,15 +416,8 @@ func doQueryNoParameters(passedQuery string) []string {
 
 // GetLibraryCategory just returns a category label for a passed library, e.g. "networking"
 func GetLibraryCategory(library string) string {
-	// BEGIN not DRY :()
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
-	// END not DRY
 
 	var firstSQLquery = "SELECT category FROM libraries WHERE library_name = $1 COLLATE  NOCASE"
 	libraryCategory := doSimplePreparedQuery(db, firstSQLquery, library)
@@ -482,15 +429,9 @@ func GetLibraryCategory(library string) string {
 }
 
 func GetAverageBinarySize(osType string) string {
-	// BEGIN not DRY :()
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
-	// END not DRY
+
 	var firstSQLquery = "SELECT ROUND(AVG(binsz)) FROM filestore WHERE os_type = $1" // select avg(binsz) from filestore where os_type = 'windows'
 
 	avgSz := doSimplePreparedQuery(db, firstSQLquery, osType)
@@ -534,14 +475,8 @@ func doSimplePreparedQuery(db *sql.DB, SQLquery string, libName string) string {
 
 // TODO seems like queries could be refactored into fewer methods..maybe just this one?
 func DoBuiltUpPreparedQuery(SQLquery string) string {
-	// BEGIN not DRY :()
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
-	// END not DRY
 
 	stmt, err := db.Prepare(SQLquery) // prepared statement, for safety :)
 	errors.Check(err)
@@ -577,33 +512,21 @@ func DoBuiltUpPreparedQuery(SQLquery string) string {
 }
 
 func GetFloat64TotalRecords(osType string) float64 {
-	// BEGIN not DRY :()
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
-	// END not DRY
+
 	var sqlQueryForTotal = "SELECT COUNT(md5_hash) FROM filestore WHERE os_type = $1"
 	rawTotalRecords := doSimplePreparedQuery(db, sqlQueryForTotal, osType) // just contrived $1 arg, to fit need of 'doSimplePreparedQuery'
 	float64TotalRecords, err := strconv.ParseFloat(rawTotalRecords, 64)
+	errors.Check(err)
 
 	return float64TotalRecords
 }
 
-/*
-GetProbabilityOfSomething should return a value between 0.0 and 1.0
-*/
+//GetProbabilityOfSomething should return a value between 0.0 and 1.0
 func GetProbabilityOfSomething(targetFieldName string, operator string, numericValue string, osType string) float64 { // e.g. priorFieldName =binsz
-	// BEGIN not DRY :()
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
-	// END not DRY
 
 	var sqlQueryForTarget = "SELECT COUNT(" + targetFieldName + ") FROM filestore WHERE " + targetFieldName + " " + operator + " " + numericValue + " AND os_type = $1"
 
@@ -611,6 +534,7 @@ func GetProbabilityOfSomething(targetFieldName string, operator string, numericV
 
 	rawPriorNumber := doSimplePreparedQuery(db, sqlQueryForTarget, osType)
 	float64PriorNumber, err := strconv.ParseFloat(rawPriorNumber, 64) // 604
+	errors.Check(err)
 
 	float64TotalRecords := GetFloat64TotalRecords(osType)
 	probability := float64PriorNumber / float64TotalRecords
@@ -621,18 +545,13 @@ func GetProbabilityOfSomething(targetFieldName string, operator string, numericV
 // GetProbabilityOfPriorGivenPosterior (priorFieldName, priOperator, priorNumericValue, postFieldName, postOperator, postNumericValue)
 /// implementing this:  select count(md5_hash) from filestore where binsz > 55000 AND  networking_calls > 2
 func GetProbabilityOfPriorGivenPosterior(priorFieldName string, priOperator string, priorNumericValue string, postFieldName string, postOperator string, postNumericValue string, osType string) float64 {
-	// BEGIN not DRY :()
-	var pathToDataDB = getPathToDataDB()
-	var WRUdir = getWRUdir()
-	checkDBexists(pathToDataDB, WRUdir)
-	db, err := sql.Open("sqlite3", pathToDataDB)
-	errors.Check(err)
+	db = getDBconnection()
 	defer db.Close()
-	// END not DRY
 
 	var sqlQuery = "SELECT COUNT(md5_hash) FROM filestore WHERE " + priorFieldName + " " + priOperator + " " + priorNumericValue + " AND " + postFieldName + " " + postOperator + " " + postNumericValue + " AND os_type = $1"
 	rawProbOfPriorGivenPosterior := doSimplePreparedQuery(db, sqlQuery, osType)
-	float64ProbabilityOfPriorGivenPosterior, err := strconv.ParseFloat(rawProbOfPriorGivenPosterior, 64)
+	float64ProbabilityOfPriorGivenPosterior, parseError := strconv.ParseFloat(rawProbOfPriorGivenPosterior, 64)
+	errors.Check(parseError)
 	// fmt.Println("float64ProbabilityOfPriorGivenPosterior = ", float64ProbabilityOfPriorGivenPosterior)
 	float64TotalRecords := GetFloat64TotalRecords(osType)
 	float64ProbabilityOfPriorGivenPosterior = float64ProbabilityOfPriorGivenPosterior / float64TotalRecords
