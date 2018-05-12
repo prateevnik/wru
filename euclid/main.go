@@ -291,7 +291,7 @@ func GetEuclidianPeerBinaries(targetFileHash string, osType string, fileInfoPtr 
 		}
 
 		if known_vulnerable > 0 {
-			fileName = fileName + " *** VULNERABLE *** "
+			fileName = fileName + " *** FLAGGED *** "
 		}
 
 		mapOfKnownFilesWithEuclideanDistances[fileName] = euclidSumSQRT
