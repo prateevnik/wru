@@ -68,13 +68,12 @@ func main() {
 	var methodsUsed = windows.Methods()
 
 	var targetFileHash, _ = crypto.MD5hashAsPrimaryKey(targetFile) //<== wru sub-package
+
 	persistence.StoreResult(targetFileHash, targetFile, osType, allTestResults, methodsUsed, *userSuppliedDescriptionPtr, *vulnerablePtr)
 
 	if osType == "windows" {
-
 		euclidianPeersArray, functionalityArray, verbosity := doWindowsAnalysis(targetFile, targetFileHash, osType, numberPeersPtr,
 			allTestResults, methodsUsed, verbosePtr, fileInfoPtr, quickBayesianPtr, peerGroupPercentageBoundary, userSpecifiedMetadata, userSpecifiedExcludeMetadata)
-
 		printResults(targetFile, verbosity, euclidianPeersArray, functionalityArray)
 	} else if osType == "linux" {
 		fmt.Println("Support for Linux coming soon!")
@@ -91,7 +90,6 @@ func doWindowsAnalysis(targetFile string, targetFileHash string, osType string, 
 	//fmt.Println("::doWindowsAnalysis, wir haben ", *userSpecifiedMetadata)
 
 	euclidianPeersArray := euclid.GetEuclideanPeers(targetFile, targetFileHash, osType, numberPeersPtr, fileInfoPtr, userSpecifiedMetadata, userSpecifiedExcludeMetadata)
-
 	functionalityArray := windows.GetFunctionalityArray(allTestResults, methodsUsed)
 	var verbosity string
 
