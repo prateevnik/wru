@@ -24,13 +24,13 @@ func getTargetFileNumbers(targetFileHash string) map[string]float64 {
 	referenceMap := make(map[string]float64)
 
 	var targetmd5Hash, targetfileName string
-	var targetstaticScore, targetcodeSize, targetbinsz, targetsymbols,
+	var targetcodeSize, targetbinsz, targetsymbols,
 		targetsections, targetlibraryCount, targetimports, targetnum_data_strings, targetsystem_calls, targetnetworking_calls, targetmedia_calls,
 		targetui_calls, targetregistry_calls, targetsecurity_calls, targetcrypto_calls, targetdatabase_calls, targetunknown_calls float64
 
 	//fmt.Println("PRUEFPUNKT A")
 	for targetRows.Next() {
-		err := targetRows.Scan(&targetmd5Hash, &targetfileName, &targetstaticScore,
+		err := targetRows.Scan(&targetmd5Hash, &targetfileName,
 			&targetcodeSize, &targetbinsz, &targetsymbols, &targetsections, &targetlibraryCount, &targetimports, &targetnum_data_strings,
 			&targetsystem_calls, &targetnetworking_calls, &targetmedia_calls, &targetui_calls, &targetregistry_calls, &targetsecurity_calls,
 			&targetcrypto_calls, &targetdatabase_calls, &targetunknown_calls)
@@ -39,7 +39,6 @@ func getTargetFileNumbers(targetFileHash string) map[string]float64 {
 		}
 		//fmt.Println("PRUEFPUNKT B")
 
-		referenceMap["targetstaticScore"] = targetstaticScore
 		referenceMap["targetcodeSize"] = targetcodeSize
 		referenceMap["targetbinsz"] = targetbinsz
 		referenceMap["targetsymbols"] = targetsymbols
@@ -66,6 +65,7 @@ func GetEuclideanPeers(targetFile string, targetFileHash string, osType string, 
 	userSpecifiedMetadata *string, userSpecifiedExcludeMetadata *string) []string {
 
 	euclidianPeersMap := GetEuclidianPeerBinaries(targetFileHash, osType, fileInfoPtr, userSpecifiedMetadata, userSpecifiedExcludeMetadata)
+
 	if debug {
 		fmt.Println("::GetEuclideanPeers, euclidianPeersMap is: ", euclidianPeersMap)
 	}
@@ -113,7 +113,7 @@ func GetEuclidianPeerBinaries(targetFileHash string, osType string, fileInfoPtr 
 	peerBinaryRows := persistence.RetrievePeerBinaryRows(osType) // HIER
 
 	var md5Hash, fileName, description string
-	var staticScore, codeSize, binsz, symbols, sections, libraryCount, imports, num_data_strings, system_calls, networking_calls,
+	var codeSize, binsz, symbols, sections, libraryCount, imports, num_data_strings, system_calls, networking_calls,
 		media_calls, ui_calls, registry_calls, security_calls, crypto_calls, database_calls, unknown_calls, known_vulnerable float64
 
 	mapOfKnownFilesWithEuclideanDistances := make(map[string]float64)
@@ -121,7 +121,7 @@ func GetEuclidianPeerBinaries(targetFileHash string, osType string, fileInfoPtr 
 	for peerBinaryRows.Next() {
 		// HIER: should spin off a Go routine to compute Euclidean
 
-		err := peerBinaryRows.Scan(&md5Hash, &fileName, &description, &staticScore, &codeSize, &binsz, &symbols, &sections, &libraryCount, &imports, &num_data_strings,
+		err := peerBinaryRows.Scan(&md5Hash, &fileName, &description, &codeSize, &binsz, &symbols, &sections, &libraryCount, &imports, &num_data_strings,
 			&system_calls, &networking_calls, &media_calls, &ui_calls, &registry_calls, &security_calls, &crypto_calls, &database_calls, &unknown_calls, &known_vulnerable)
 		if err != nil {
 			log.Fatal(err)
