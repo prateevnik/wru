@@ -59,7 +59,7 @@ func RetrievePeerBinaryRows(osType string) *sql.Rows {
 	defer db.Close()
 
 	// now get the rest of the rows
-	peerBinaryRows, queryError := db.Query("SELECT md5_hash, filename, description, static_score, code_size, binsz, "+
+	peerBinaryRows, queryError := db.Query("SELECT md5_hash, filename, description, code_size, binsz, "+
 		" symbols, sections, library_count, imports, num_data_strings,"+
 		"system_calls, networking_calls, media_calls, ui_calls, registry_calls, security_calls, crypto_calls, database_calls, unknown_calls, known_vulnerable  FROM filestore WHERE os_type = $1", osType)
 
@@ -75,7 +75,7 @@ func RetrieveTargetFileRows(targetFileHash string) *sql.Rows {
 	defer db.Close()
 
 	// end setup, on with the show:
-	targetRows, targetErr := db.Query("SELECT md5_hash, filename, static_score, code_size, binsz, "+
+	targetRows, targetErr := db.Query("SELECT md5_hash, filename, code_size, binsz, "+
 		" symbols, sections, library_count, imports, num_data_strings, system_calls, networking_calls, media_calls, ui_calls, registry_calls, security_calls, crypto_calls, database_calls, unknown_calls  FROM filestore WHERE md5_hash = $1", targetFileHash)
 	if targetErr != nil {
 		log.Fatal(err)
@@ -248,7 +248,7 @@ func StoreResult(MD5hash string, targetFile string, osType string, scores map[in
 	}
 
 	_, execError2 := db.Exec("INSERT INTO `filestore` (md5_hash, filename, timestamp, os_type, " +
-		"static_score, code_size, binsz, symbols, sections, library_count, imports," +
+		"code_size, binsz, symbols, sections, library_count, imports," +
 		"num_data_strings, num_wholefile_strings, description, known_vulnerable, " +
 		"system_calls, networking_calls, media_calls, " +
 		"UI_calls, registry_calls,security_calls,crypto_calls, database_calls, unknown_calls, method_calls" +
@@ -257,7 +257,7 @@ func StoreResult(MD5hash string, targetFile string, osType string, scores map[in
 		"', '" + targetFile +
 		"', CURRENT_TIMESTAMP" +
 		", '" + osType +
-		"', '" + floatToString(0.0) + // static score is deprecated in favor of Euclidean distance 8-13-17
+		//"', '" + floatToString(0.0) + // static score is deprecated in favor of Euclidean distance 8-13-17
 		"', '" + floatToString(codeSize) +
 		"', '" + floatToString(binsz) +
 		"', '" + floatToString(symbols) +
@@ -309,7 +309,7 @@ func StoreResult(MD5hash string, targetFile string, osType string, scores map[in
 					"filename = '" + targetFile + "', " +
 					"timestamp = CURRENT_TIMESTAMP, " +
 					"os_type = '" + osType + "', " +
-					"static_score = '" + floatToString(0.0) + "', " +
+					//"static_score = '" + floatToString(0.0) + "', " +
 					"code_size = '" + floatToString(codeSize) + "', " +
 					" binsz = '" + floatToString(binsz) + "', " +
 					"symbols = '" + floatToString(symbols) + "', " +
