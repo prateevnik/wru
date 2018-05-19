@@ -3,12 +3,17 @@ A: "wru" tries to predict the behavior of a Windows executable without actually 
   The idea is that by predicting the capabilities of an executable, and also by showing what other programs a new executable seems to resemble most closely (and how closely), one can predict runtime behavior to a useful degree.
 
 Q:  Why?
+
 A   The tool is fairly fast, performing its analysis in a few seconds on one executable. This can let one quickly decide if a given executable is interesting enough to warrant further investigation using behavioral analysis or debugging.
 
+
 Q:  Does this really work?
+
 A:  In the author's experience, yes.  I like to use it as a triage tool, often looping over files, to decide which one(s) are worth investing time to debug.  
 
+
 Q: How does this "wru" tool do its work under the covers?
+
 A: A longer answer, see below under the section about installing on Ubuntu.
 
 
