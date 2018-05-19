@@ -1,16 +1,17 @@
 Q: What does this "wru" tool do?
+
 A: "wru" tries to predict the behavior of a Windows executable without actually running the program.  It does this by statically obtaining about 20 metrics from the program using the Radare2 open source debugger to get those metrics.  The 20 or so metrics were the ones found to be subjectively most useful after trial and error with static analysis and spreadsheet analysis. Some of these metrics are simple, others are lengthy strings.  "wru" then refers to its datastore of similar metadata from all the other Windows programs it's looked at, and using a custom version of the Euclidean Distance algorithm, displays which other programs a given executable most closely resembles.  "wru" also predicts what broad areas of interesting functionality the target program will have (currently: Networking, Media, UI, Registry, Security, Crypto, Database) based on known libraries and educated guessing based upon keywords found in imports and functions.  Lastly, "wru" can provide estimates of specialized functionality using Bayes Theorem, in instances when a given target executable is not providing good metadata, or simply as another way to predict functionality.
   The idea is that by predicting the capabilities of an executable, and also by showing what other programs a new executable seems to resemble most closely (and how closely), one can predict runtime behavior to a useful degree.
-
+------------------------------------------------------------------------------
 Q:  Why?
 
 A   The tool is fairly fast, performing its analysis in a few seconds on one executable. This can let one quickly decide if a given executable is interesting enough to warrant further investigation using behavioral analysis or debugging.
-
+------------------------------------------------------------------------------
 
 Q:  Does this really work?
 
 A:  In the author's experience, yes.  I like to use it as a triage tool, often looping over files, to decide which one(s) are worth investing time to debug.  
-
+------------------------------------------------------------------------------
 
 Q: How does this "wru" tool do its work under the covers?
 
