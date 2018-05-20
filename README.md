@@ -52,4 +52,27 @@ For SQLite3 on OSX, need to do this stuff:
 ========================
 
 Q: How does this "wru" tool do its work?
-A:  TODO..
+
+A: Currently "wru" starts by shelling out to rabin2 (from Radare2) to get static metrics from the target executable.  The static metrics for each file currently include:
+- MD5 hash (only as a primary key, not for hashing a confidential value)
+- OS type (currently only "windows" is supported)
+- code_size (size of the .text or code segment of the executable)
+- binsz (total size of the executable, the same thing as 'ls -l' would show)
+- symbols (the number of symbols in the executable)
+- sections (the number of sections in the executable)
+- library_count (the number of libraries imported)
+- imports (total number of all imports, often the same as library_count)
+- num_data_strings (number of ASCII strings in the data section of the executable)
+- num_wholefile_strings (number of ASCII strings in the entire executable)
+- system_calls (number of known system calls identified, using wru's "libraries" table in the SQLite datastore)
+- networking_calls (number of known networking calls, using wru's "libraries table")
+- media_calls (number of known media calls, ditto)
+- UI_calls (number of known calls for User Interface fuctions, ditto)
+- registry_calls (..more of the same .. :)
+- security_calls (..ditto..)
+- crypto_calls (..ditto..)
+- database_calls (..ditto..)
+- unknown_calls (number of calls that we could not identify)
+- method_calls (not a number, this metadata field for each file stores a long string of all the library.method calls we could see from the target executable)
+
+TO BE CONTINUED ...
